@@ -29,15 +29,20 @@ function atualizarKPIsETabela(exames) {
 
     const contagemCid = {};
     let hpyloriPos = 0;
-    let totalPed = 0;
+    let hpyloriNeg = 0;
 
     exames.forEach(exame => {
+        // Contagem de CIDs
         const cid = exame.cidSugerido || "N/I";
         contagemCid[cid] = (contagemCid[cid] || 0) + 1;
 
-        if (exame.pacienteProntuario && exame.pacienteProntuario.startsWith("PED-")) {
-            totalPed++;
-            if (exame.microscopia && exame.microscopia.toLowerCase().includes("bacilos")) {
+        // Análise de negatividade/positividade de H. pylori no Laudo
+        const laudo = (exame.diagnosticoSugerido || "").toLowerCase();
+        
+        if (laudo.includes("pylori") || laudo.includes("giemsa") || laudo.includes("bacilos")) {
+            if (laudo.includes("negativ") || laudo.includes("ausente") || laudo.includes("não detectad")) {
+                hpyloriNeg++;
+            } else if (laudo.includes("associad") || laudo.includes("positiv") || laudo.includes("presente")) {
                 hpyloriPos++;
             }
         }
@@ -46,7 +51,8 @@ function atualizarKPIsETabela(exames) {
     document.getElementById("kpi-gastrite").innerText = contagemCid["K29.5"] || 0;
     document.getElementById("kpi-melanoma").innerText = contagemCid["C43.5"] || 0;
     
-    const taxaHpylori = totalPed > 0 ? ((hpyloriPos / totalPed) * 100).toFixed(0) : 0;
+    const totalPesquisados = hpyloriPos + hpyloriNeg;
+    const taxaHpylori = totalPesquisados > 0 ? ((hpyloriPos / totalPesquisados) * 100).toFixed(0) : 0;
     document.getElementById("kpi-hpylori").innerText = `${taxaHpylori}%`;
 
     const tbody = document.getElementById("tabela-corpo");
@@ -61,7 +67,7 @@ function atualizarKPIsETabela(exames) {
         </tr>
     `).join('');
 
-    renderizarGraficos(contagemCid, hpyloriPos, totalPed - hpyloriPos);
+    renderizarGraficos(contagemCid, hpyloriPos, hpyloriNeg);
 }
 
 function renderizarGraficos(cidsData, hpyloriPos, hpyloriNeg) {
