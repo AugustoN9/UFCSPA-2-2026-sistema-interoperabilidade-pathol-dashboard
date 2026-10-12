@@ -4,6 +4,35 @@ const api = new ApiService();
 let chartCidInstance = null;
 let chartHpyloriInstance = null;
 
+// Cache local para armazenar os resultados retornados pela API do DATASUS/CID-10
+const cacheCidDescricoes = {};
+
+/**
+ * Consulta a API pública da CID-10 (Brasil/DATASUS) para obter a descrição oficial do código.
+ */
+async function buscarDescricaoCid(cid) {
+    if (!cid || cid === "N/I") return "Não Informado";
+    if (cacheCidDescricoes[cid]) return cacheCidDescricoes[cid];
+
+    try {
+        // Requisição para a API pública do CID-10
+        const response = await fetch(`https://cid10-api.herokuapp.com/cid10/${encodeURIComponent(cid)}`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            // A API retorna o objeto contendo o campo 'descricao' ou 'nome'
+            const descricao = data.descricao || data.nome || data.description || "Descrição não encontrada";
+            cacheCidDescricoes[cid] = descricao;
+            return descricao;
+        }
+    } catch (error) {
+        console.warn(`Não foi possível traduzir o CID ${cid} via API externa:`, error);
+    }
+
+    // Fallback caso a API falhe ou o código não seja retornado
+    return "Diagnóstico Histopatológico";
+}
+
 export async function carregarDashboard() {
     const statusEl = document.getElementById("status-api");
     try {
@@ -15,7 +44,7 @@ export async function carregarDashboard() {
         statusEl.innerText = "API Conectada";
         statusEl.className = "px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
 
-        atualizarKPIsETabela(exames);
+        await atualizarKPIsETabela(exames);
 
     } catch (error) {
         console.error("Erro ao carregar dados:", error);
@@ -24,7 +53,18 @@ export async function carregarDashboard() {
     }
 }
 
-function atualizarKPIsETabela(exames) {
+function obterIntervaloDatas(exames) {
+    const anos = exames
+        .map(e => e.dataLiberacaoLaudo ? new Date(e.dataLiberacaoLaudo).getFullYear() : null)
+        .filter(ano => ano !== null);
+
+    if (anos.length === 0) return "Período Não Informado";
+    const minAno = Math.min(...anos);
+    const maxAno = Math.max(...anos);
+    return minAno === maxAno ? `${minAno}` : `${minAno} – ${maxAno}`;
+}
+
+async function atualizarKPIsETabela(exames) {
     document.getElementById("kpi-total").innerText = exames.length;
 
     const contagemCid = {};
@@ -32,11 +72,9 @@ function atualizarKPIsETabela(exames) {
     let hpyloriNeg = 0;
 
     exames.forEach(exame => {
-        // Contagem de CIDs
         const cid = exame.cidSugerido || "N/I";
         contagemCid[cid] = (contagemCid[cid] || 0) + 1;
 
-        // Análise de negatividade/positividade de H. pylori no Laudo
         const laudo = (exame.diagnosticoSugerido || "").toLowerCase();
         
         if (laudo.includes("pylori") || laudo.includes("giemsa") || laudo.includes("bacilos")) {
@@ -48,6 +86,10 @@ function atualizarKPIsETabela(exames) {
         }
     });
 
+    // Pré-carrega as descrições de todos os CIDs encontrados na API da CID-10
+    const listaCids = Object.keys(contagemCid);
+    await Promise.all(listaCids.map(cid => buscarDescricaoCid(cid)));
+
     document.getElementById("kpi-gastrite").innerText = contagemCid["K29.5"] || 0;
     document.getElementById("kpi-melanoma").innerText = contagemCid["C43.5"] || 0;
     
@@ -55,6 +97,20 @@ function atualizarKPIsETabela(exames) {
     const taxaHpylori = totalPesquisados > 0 ? ((hpyloriPos / totalPesquisados) * 100).toFixed(0) : 0;
     document.getElementById("kpi-hpylori").innerText = `${taxaHpylori}%`;
 
+    const periodoTexto = obterIntervaloDatas(exames);
+
+    // Injeta cabeçalho de contexto da amostra epidemiológica no HTML
+    const contextoEl = document.getElementById("contexto-amostra");
+    if (contextoEl) {
+        contextoEl.innerHTML = `
+            <div><span class="text-slate-400 block text-xs">UNIDADE</span><strong class="text-white">Patologia - UFCSPA</strong></div>
+            <div><span class="text-slate-400 block text-xs">PERÍODO</span><strong class="text-white">${periodoTexto}</strong></div>
+            <div><span class="text-slate-400 block text-xs">COORTE</span><strong class="text-white">Pediátrica (PED) & Dermatológica (DERM)</strong></div>
+            <div><span class="text-slate-400 block text-xs">ABRANGÊNCIA GEOGRÁFICA</span><strong class="text-white">Porto Alegre / RS</strong></div>
+        `;
+    }
+
+    // Preenche a tabela com a Coorte Integrada
     const tbody = document.getElementById("tabela-corpo");
     tbody.innerHTML = exames.map(exame => `
         <tr class="hover:bg-slate-700/30 border-b border-slate-700/50">
@@ -67,10 +123,11 @@ function atualizarKPIsETabela(exames) {
         </tr>
     `).join('');
 
-    renderizarGraficos(contagemCid, hpyloriPos, hpyloriNeg);
+    renderizarGraficos(contagemCid, hpyloriPos, hpyloriNeg, periodoTexto);
 }
 
-function renderizarGraficos(cidsData, hpyloriPos, hpyloriNeg) {
+function renderizarGraficos(cidsData, hpyloriPos, hpyloriNeg, periodoTexto) {
+    // 1. Gráfico de CIDs (Bar Chart) utilizando o cache da API da CID-10
     const ctxCid = document.getElementById('chartCid').getContext('2d');
     if (chartCidInstance) chartCidInstance.destroy();
 
@@ -79,7 +136,7 @@ function renderizarGraficos(cidsData, hpyloriPos, hpyloriNeg) {
         data: {
             labels: Object.keys(cidsData),
             datasets: [{
-                label: 'Exames',
+                label: 'Nº de Casos',
                 data: Object.values(cidsData),
                 backgroundColor: '#6366f1',
                 borderRadius: 4
@@ -88,6 +145,27 @@ function renderizarGraficos(cidsData, hpyloriPos, hpyloriNeg) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: `Prevalência Diagnóstica (${periodoTexto}) — Coorte Integrada UFCSPA`,
+                    color: '#94a3b8',
+                    font: { size: 12, weight: 'normal' }
+                },
+                tooltip: {
+                    callbacks: {
+                        title: function(tooltipItems) {
+                            if (!tooltipItems.length) return '';
+                            const cid = tooltipItems[0].label;
+                            const descricao = cacheCidDescricoes[cid] || 'Diagnóstico Histopatológico';
+                            return `${cid} — ${descricao}`;
+                        },
+                        label: function(context) {
+                            return ` Total: ${context.raw} caso(s)`;
+                        }
+                    }
+                }
+            },
             scales: {
                 x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
                 y: { ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: '#334155' } }
@@ -95,22 +173,63 @@ function renderizarGraficos(cidsData, hpyloriPos, hpyloriNeg) {
         }
     });
 
+    // 2. Gráfico H. Pylori (Doughnut Chart) com Porcentagens e Texto Central
     const ctxHpylori = document.getElementById('chartHpylori').getContext('2d');
     if (chartHpyloriInstance) chartHpyloriInstance.destroy();
+
+    const totalHpylori = hpyloriPos + hpyloriNeg;
+    const pctPos = totalHpylori > 0 ? ((hpyloriPos / totalHpylori) * 100).toFixed(1) : 0;
+    const pctNeg = totalHpylori > 0 ? ((hpyloriNeg / totalHpylori) * 100).toFixed(1) : 0;
+
+    const centerTextPlugin = {
+        id: 'centerText',
+        afterDraw(chart) {
+            const { ctx, chartArea: { width, height, top, left } } = chart;
+            ctx.save();
+            ctx.font = 'bold 16px sans-serif';
+            ctx.fillStyle = '#10b981';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const centerX = left + width / 2;
+            const centerY = top + height / 2;
+            ctx.fillText(`${pctPos}% Positivo`, centerX, centerY);
+            ctx.restore();
+        }
+    };
 
     chartHpyloriInstance = new Chart(ctxHpylori, {
         type: 'doughnut',
         data: {
-            labels: ['Positivo (Giemsa)', 'Negativo'],
+            labels: [
+                `Positivo: ${hpyloriPos} (${pctPos}%)`,
+                `Negativo: ${hpyloriNeg} (${pctNeg}%)`
+            ],
             datasets: [{
                 data: [hpyloriPos, hpyloriNeg],
-                backgroundColor: ['#10b981', '#64748b']
+                backgroundColor: ['#10b981', '#64748b'],
+                borderColor: '#1e293b',
+                borderWidth: 2
             }]
         },
+        plugins: [centerTextPlugin],
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: '#94a3b8' } } }
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: { color: '#94a3b8', font: { size: 12 } }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const val = context.raw;
+                            const pct = totalHpylori > 0 ? ((val / totalHpylori) * 100).toFixed(1) : 0;
+                            return ` ${context.label.split(':')[0]}: ${val} casos (${pct}%)`;
+                        }
+                    }
+                }
+            }
         }
     });
 }
