@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PatholDashboard - Análise Epidemiológica</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+  <body class="bg-slate-900 text-slate-100 min-h-screen">
+    <nav
+      class="bg-slate-800 border-b border-slate-700 px-6 py-4 flex justify-between items-center"
+    >
+      <div class="flex items-center space-x-3">
+        <span class="text-2xl">📊</span>
+        <h1 class="text-xl font-bold text-indigo-400">
+          Portal Epidemiológico Autônomo
+        </h1>
+      </div>
+      <div class="flex items-center space-x-3">
+        <span
+          id="status-api"
+          class="px-3 py-1 rounded-full text-xs font-semibold bg-slate-700 text-slate-300"
+          >Aguardando</span
+        >
+        <button
+          id="btn-atualizar"
+          class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded transition"
+        >
+          Atualizar
+        </button>
+      </div>
+    </nav>
+
+    <main class="p-6 max-w-7xl mx-auto space-y-6">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+          <p class="text-xs text-slate-400 uppercase font-semibold">
+            Total Exames
+          </p>
+          <p id="kpi-total" class="text-2xl font-bold text-white mt-1">--</p>
+        </div>
+        <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+          <p class="text-xs text-slate-400 uppercase font-semibold">
+            Gastrite (K29.5)
+          </p>
+          <p id="kpi-gastrite" class="text-2xl font-bold text-amber-400 mt-1">
+            --
+          </p>
+        </div>
+        <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+          <p class="text-xs text-slate-400 uppercase font-semibold">
+            Positividade H. Pylori
+          </p>
+          <p id="kpi-hpylori" class="text-2xl font-bold text-emerald-400 mt-1">
+            --%
+          </p>
+        </div>
+        <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+          <p class="text-xs text-slate-400 uppercase font-semibold">
+            Melanoma (C43.5)
+          </p>
+          <p id="kpi-melanoma" class="text-2xl font-bold text-rose-400 mt-1">
+            --
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+          <h3 class="text-xs font-semibold text-slate-300 uppercase mb-3">
+            Distribuição de CIDs
+          </h3>
+          <div class="h-56"><canvas id="chartCid"></canvas></div>
+        </div>
+        <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+          <h3 class="text-xs font-semibold text-slate-300 uppercase mb-3">
+            Infeção por H. Pylori (Giemsa)
+          </h3>
+          <div class="h-56"><canvas id="chartHpylori"></canvas></div>
+        </div>
+      </div>
+
+      <div
+        class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden"
+      >
+        <div
+          class="p-4 border-b border-slate-700 font-semibold text-sm text-slate-300"
+        >
+          Coorte Integrada (Exame → Prontuário → Paciente)
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-900/60 text-slate-400 uppercase">
+              <tr>
+                <th class="p-3">Exame</th>
+                <th class="p-3">Prontuário</th>
+                <th class="p-3">CID</th>
+                <th class="p-3">Laudo Histopatológico</th>
+                <th class="p-3">Amostragem</th>
+                <th class="p-3">Liberação</th>
+              </tr>
+            </thead>
+            <tbody id="tabela-corpo" class="text-slate-300">
+              <tr>
+                <td colspan="6" class="p-4 text-center text-slate-500">
+                  Carregando...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <script type="module">
+      import { carregarDashboard } from "./js/dashboard.js";
+
+      document.addEventListener("DOMContentLoaded", carregarDashboard);
+      document
+        .getElementById("btn-atualizar")
+        .addEventListener("click", carregarDashboard);
+    </script>
+  </body>
+</html>
