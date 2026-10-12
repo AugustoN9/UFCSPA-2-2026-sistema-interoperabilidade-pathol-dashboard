@@ -4,32 +4,46 @@ const api = new ApiService();
 let chartCidInstance = null;
 let chartHpyloriInstance = null;
 
-// Cache local para armazenar os resultados retornados pela API do DATASUS/CID-10
+// Mapeamento interno de segurança para resposta instantânea dos CIDs da instituição
+const DICIONARIO_LOCAL_CIDS = {
+    'K29.5': 'Gastrite Crônica Não Especificada',
+    'K29.3': 'Gastroduodenite Crônica',
+    'K29.1': 'Outras Gastrites Agudas',
+    'K29.7': 'Gastrite Não Especificada',
+    'C43.5': 'Melanoma Maligno do Tronco',
+    'C43.9': 'Melanoma Maligno Não Especificado'
+};
+
 const cacheCidDescricoes = {};
 
 /**
- * Consulta a API pública da CID-10 (Brasil/DATASUS) para obter a descrição oficial do código.
+ * Consulta a descrição do CID-10 priorizando o dicionário local e utilizando API da NLM como fallback.
  */
 async function buscarDescricaoCid(cid) {
     if (!cid || cid === "N/I") return "Não Informado";
     if (cacheCidDescricoes[cid]) return cacheCidDescricoes[cid];
 
-    try {
-        // Requisição para a API pública do CID-10
-        const response = await fetch(`https://cid10-api.herokuapp.com/cid10/${encodeURIComponent(cid)}`);
-        
-        if (response.ok) {
-            const data = await response.json();
-            // A API retorna o objeto contendo o campo 'descricao' ou 'nome'
-            const descricao = data.descricao || data.nome || data.description || "Descrição não encontrada";
-            cacheCidDescricoes[cid] = descricao;
-            return descricao;
-        }
-    } catch (error) {
-        console.warn(`Não foi possível traduzir o CID ${cid} via API externa:`, error);
+    // 1. Tenta obter do mapeamento local de alta performance
+    if (DICIONARIO_LOCAL_CIDS[cid]) {
+        cacheCidDescricoes[cid] = DICIONARIO_LOCAL_CIDS[cid];
+        return DICIONARIO_LOCAL_CIDS[cid];
     }
 
-    // Fallback caso a API falhe ou o código não seja retornado
+    // 2. Consulta a API pública da NLM (Clinical Tables) se o código for inédito
+    try {
+        const response = await fetch(`https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search?terms=${encodeURIComponent(cid)}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data && data[3] && data[3].length > 0) {
+                const descricaoApi = data[3][0][1]; // Retorna descrição oficial
+                cacheCidDescricoes[cid] = descricaoApi;
+                return descricaoApi;
+            }
+        }
+    } catch (error) {
+        console.warn(`Erro ao consultar API externa para o CID ${cid}:`, error);
+    }
+
     return "Diagnóstico Histopatológico";
 }
 
@@ -86,7 +100,7 @@ async function atualizarKPIsETabela(exames) {
         }
     });
 
-    // Pré-carrega as descrições de todos os CIDs encontrados na API da CID-10
+    // Resolve as descrições dos CIDs para os tooltips
     const listaCids = Object.keys(contagemCid);
     await Promise.all(listaCids.map(cid => buscarDescricaoCid(cid)));
 
@@ -99,7 +113,6 @@ async function atualizarKPIsETabela(exames) {
 
     const periodoTexto = obterIntervaloDatas(exames);
 
-    // Injeta cabeçalho de contexto da amostra epidemiológica no HTML
     const contextoEl = document.getElementById("contexto-amostra");
     if (contextoEl) {
         contextoEl.innerHTML = `
@@ -110,7 +123,6 @@ async function atualizarKPIsETabela(exames) {
         `;
     }
 
-    // Preenche a tabela com a Coorte Integrada
     const tbody = document.getElementById("tabela-corpo");
     tbody.innerHTML = exames.map(exame => `
         <tr class="hover:bg-slate-700/30 border-b border-slate-700/50">
@@ -127,7 +139,7 @@ async function atualizarKPIsETabela(exames) {
 }
 
 function renderizarGraficos(cidsData, hpyloriPos, hpyloriNeg, periodoTexto) {
-    // 1. Gráfico de CIDs (Bar Chart) utilizando o cache da API da CID-10
+    // 1. Gráfico de CIDs (Bar Chart)
     const ctxCid = document.getElementById('chartCid').getContext('2d');
     if (chartCidInstance) chartCidInstance.destroy();
 
@@ -173,35 +185,19 @@ function renderizarGraficos(cidsData, hpyloriPos, hpyloriNeg, periodoTexto) {
         }
     });
 
-    // 2. Gráfico H. Pylori (Doughnut Chart) com Porcentagens e Texto Central
+    // 2. Gráfico H. Pylori (Doughnut Chart)
     const ctxHpylori = document.getElementById('chartHpylori').getContext('2d');
     if (chartHpyloriInstance) chartHpyloriInstance.destroy();
 
     const totalHpylori = hpyloriPos + hpyloriNeg;
-    const pctPos = totalHpylori > 0 ? ((hpyloriPos / totalHpylori) * 100).toFixed(1) : 0;
-    const pctNeg = totalHpylori > 0 ? ((hpyloriNeg / totalHpylori) * 100).toFixed(1) : 0;
-
-    const centerTextPlugin = {
-        id: 'centerText',
-        afterDraw(chart) {
-            const { ctx, chartArea: { width, height, top, left } } = chart;
-            ctx.save();
-            ctx.font = 'bold 16px sans-serif';
-            ctx.fillStyle = '#10b981';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            const centerX = left + width / 2;
-            const centerY = top + height / 2;
-            ctx.fillText(`${pctPos}% Positivo`, centerX, centerY);
-            ctx.restore();
-        }
-    };
+    const pctPos = totalHpylori > 0 ? ((hpyloriPos / totalHpylori) * 100).toFixed(1) : "0.0";
+    const pctNeg = totalHpylori > 0 ? ((hpyloriNeg / totalHpylori) * 100).toFixed(1) : "0.0";
 
     chartHpyloriInstance = new Chart(ctxHpylori, {
         type: 'doughnut',
         data: {
             labels: [
-                `Positivo: ${hpyloriPos} (${pctPos}%)`,
+                `Positivo (Giemsa): ${hpyloriPos} (${pctPos}%)`,
                 `Negativo: ${hpyloriNeg} (${pctNeg}%)`
             ],
             datasets: [{
@@ -211,21 +207,21 @@ function renderizarGraficos(cidsData, hpyloriPos, hpyloriNeg, periodoTexto) {
                 borderWidth: 2
             }]
         },
-        plugins: [centerTextPlugin],
         options: {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
                 legend: {
                     position: 'bottom',
-                    labels: { color: '#94a3b8', font: { size: 12 } }
+                    labels: { color: '#cbd5e1', font: { size: 13, weight: '500' } }
                 },
                 tooltip: {
                     callbacks: {
                         label: function(context) {
                             const val = context.raw;
                             const pct = totalHpylori > 0 ? ((val / totalHpylori) * 100).toFixed(1) : 0;
-                            return ` ${context.label.split(':')[0]}: ${val} casos (${pct}%)`;
+                            const status = context.dataIndex === 0 ? "Positivo (Giemsa)" : "Negativo";
+                            return ` ${status}: ${val} casos (${pct}%)`;
                         }
                     }
                 }
